@@ -1,0 +1,11 @@
+/node_modules
+/dist
+/jest.config.js
+/package-lock.json
+/package.json
+/tsconfig.json
+/tslint.json
+/nyc_output
+/npmignore
+/tests
+coverage
