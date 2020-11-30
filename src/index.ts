@@ -173,7 +173,7 @@ class StateManager {
     {
         active.coroutine_timer = 0;
         active.coroutine_instance = active.coroutine();
-    } 
+    }
   }
   add(
     key: number,
@@ -367,11 +367,10 @@ class Scene {
   private draw_list: Map<number, Sprite> = new Map();
   key: string;
   game: Game;
-  public obstacles: IBox[];
+  obstacles:IBox[] = [];
   constructor(configs: any) {
     this.game = configs.game;
     this.key = configs.key;
-    this.load();
   }
   add(sprite: Sprite): Sprite {
     let draw_list = this.draw_list;
@@ -400,7 +399,7 @@ class Scene {
   create() {
     this.game.start();
   }
-  update(delta: number) {}
+  update(delta:number){};
   draw(delta: number) {
     this.draw_list.forEach(sprite => sprite.draw(delta));
     let obstacles = this.obstacles;
@@ -408,7 +407,7 @@ class Scene {
     ctx.fillStyle = "black";
     for (let i = obstacles.length; i--; ) {
       let obstacle = obstacles[i];
-      ctx.fillRect(obstacle.x, obstacle.y, obstacle.w, obstacle.h);
+      ctx.fillRect(obstacle.x - obstacle.left, obstacle.y - obstacle.top, obstacle.w, obstacle.h);
     }
   }
 }
@@ -455,24 +454,22 @@ class Game {
     this.ctx.canvas.style.backgroundColor =
       configs.backgroundColor || "#00ffbb";
     this.active_scene = new this.scenes[0](this);
+    this.active_scene.load();
   }
   resize(width: number, height: number) {
     this.ctx.canvas.width = this.w = width;
     this.ctx.canvs.height = this.h = height;
   }
   set_scene(index: number) {
-    if (typeof index === "string") {
-      let scenes = this.scenes;
-      for (let i = scenes.length; i--; ) {
-        let scene = scenes[i];
-        if (scene.key === index) return (this.active_scene = new scene(this));
-      }
-      throw new Error("Invalid scene key.");
-    } else if (typeof index === "number") {
-      let scene = this.scenes[index];
-      if (scene) this.active_scene = new scene(this);
-      else throw new Error("Cannot start scene: " + scene);
-    } else throw new Error("Invalid scene index");
+    this.stop();
+    let scene = this.scenes[index];
+    if (scene) 
+    {
+      this.active_scene = new scene(this);
+      this.active_scene.load();
+    }
+    else throw new Error("Invalid scene index: " + index);
+    
   }
   start() {
     this.last_time = Date.now();
@@ -502,15 +499,12 @@ class Game {
   update() {
     let now = Date.now();
     let delta = (now - this.last_time) / 1000;
+    this.ctx.clearRect(0, 0, this.w, this.h);
     this.last_time = now;
     this.active_scene.update(delta);
-    this.draw(delta);
+    this.active_scene.draw(delta);
     this.input_manager.update();
     this.raf();
-  }
-  draw(delta: number) {
-    this.ctx.clearRect(0, 0, this.w, this.h);
-    this.active_scene.draw(delta);
   }
   keydown(e: KeyboardEvent) {
     if (!e.repeat) this.input_manager.keys.get(e.code)?.update(true);
