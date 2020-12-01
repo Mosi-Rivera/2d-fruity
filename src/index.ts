@@ -162,7 +162,7 @@ class StateManager {
     if (state.update)
         state.update(delta);
   }
-  set(key: number): void {
+  set(key: number,parameter:any = null): void {
     let state = this.states;
     let active = state[this.index];
     if (active.end) active.end();
@@ -172,7 +172,7 @@ class StateManager {
     if (active.coroutine)
     {
         active.coroutine_timer = 0;
-        active.coroutine_instance = active.coroutine();
+        active.coroutine_instance = active.coroutine(parameter);
     }
   }
   add(
@@ -267,9 +267,97 @@ class InputData {
     this.isDown = b;
   }
 }
-
+class GamepadData
+{
+  buttons:Map<number,InputData> = new Map();
+  axes:number[] = [];
+  constructor(gamepad:Gamepad)
+  {
+    for (let i = gamepad.buttons.length; i--;)
+      this.buttons.set(i,new InputData());
+    this.axes.length = gamepad.axes.length;
+  }
+  update(gamepad:Gamepad)
+  {
+    let axes = gamepad.axes;
+    this.buttons.forEach((button,i) =>{ button.update(gamepad.buttons[i].pressed);});
+    for (let i = axes.length; i--;)
+      this.axes[i] = axes[i];
+  }
+}
+class GamepadEvents
+{
+  disconnect: Map<number,(index:number) => void> = new Map();
+  connect: Map<number,(gamepad:GamepadData) => void> = new Map();
+  add_connect(func:(gamepad:GamepadData) => void)
+  {
+    let i = 0;
+    while (true)
+    {
+      if (!this.connect.has(i))
+      {
+        this.connect.set(i,func);
+        return i;
+      }
+    }
+  }
+  remove_connect(index:number)
+  {
+    this.connect.delete(index);
+  }
+  add_disconnect(func:(index:number) => void)
+  {
+    let i = 0;
+    while (true)
+    {
+      if (!this.disconnect.has(i))
+      {
+        this.disconnect.set(i,func);
+        return i;
+      }
+    }
+  }
+  remove_disconnect(index:number)
+  {
+    this.disconnect.delete(index);
+  }
+}
 class InputManager {
-  keys = new Map();
+  keys:Map<string,InputData> = null;
+  gamepads:Map<number,GamepadData> = null;
+  gamepad_events = new GamepadEvents();
+  on(event:string,func:() => any)
+  {
+    if (!func)
+      throw new Error('A callback function must be provided as an argument.')
+    if (event === 'gamepad_connect')
+    {
+      let index = this.gamepad_events.add_connect(func);
+      return () => this.gamepad_events.remove_connect(index);
+    }
+    else if ('gamepad_disconnect')
+    {
+      let index = this.gamepad_events.add_disconnect(func);
+      return () => this.gamepad_events.remove_disconnect(index);
+    }
+    else
+      throw new Error('Invalid event string.');
+  }
+  gamepad_handler(event:GamepadEvent,connecting:boolean)
+  {
+    let gamepad = event.gamepad;
+    if (connecting)
+    {
+      let gamepad_data:GamepadData = this.add_gamepad(gamepad);
+      this.gamepad_events.connect.forEach(func => func(gamepad_data));
+    }
+    else
+    {
+      let index = gamepad.index;
+      this.gamepads.delete(index);
+      this.gamepad_events.disconnect.forEach(func => func(index));
+    }
+  }
   add_keys(keys: string[] | string) {
     let map = this.keys;
     if (typeof keys === "string") map.set(keys, new InputData());
@@ -279,14 +367,70 @@ class InputManager {
         if (!map.has(key)) this.keys.set(key, new InputData());
       }
   }
-
+  keydown(e: KeyboardEvent) {
+    if (!e.repeat) this.keys.get(e.code)?.update(true);
+  }
+  keyup(e: KeyboardEvent) {
+    if (!e.repeat) this.keys.get(e.code)?.update(false);
+  }
+  keyboard()
+  {
+    this.keys = new Map();
+    document.addEventListener("keydown", this.keydown.bind(this));
+    document.addEventListener("keyup", this.keyup.bind(this));
+    if (this.gamepads === null)
+      this.update = this.update_keyboard.bind(this);
+    else
+      this.update = this.update_both.bind(this);
+  }
+  gamepad()
+  {
+    this.gamepads = new Map();
+    document.addEventListener("gamepadconnected", (e:GamepadEvent) => this.gamepad_handler(e,true),false);
+    document.addEventListener("gamepaddisconnect", (e:GamepadEvent) => this.gamepad_handler(e,true),false);
+    if (this.keys === null)
+      this.update = this.update_gamepads.bind(this);
+    else
+      this.update = this.update_both.bind(this);
+  }
   remove_key(key: string) {
     return this.keys.delete(key);
   }
-
-  update() {
+  update_gamepads()
+  {
+    let gamepads = navigator.getGamepads ? navigator.getGamepads() : ((navigator as any).webkitGetGamepads ? (navigator as any).webitGetGamepads : []);
+    for (let i = gamepads.length; i--;)
+    {
+      let gamepad = gamepads[i];
+      if (gamepad)
+      {
+        if (this.gamepads.has(i))
+          this.gamepads.get(i).update(gamepad);
+        else
+        {
+          this.add_gamepad(gamepad);
+          let gamepad_data = this.gamepads.get(gamepad.index);
+          this.gamepad_events.connect.forEach((func,i) => func(gamepad_data));
+        }
+      }
+    }
+  }
+  add_gamepad(gamepad:Gamepad)
+  {
+    let gamepad_data = new GamepadData(gamepad);
+    this.gamepads.set(gamepad.index,gamepad_data);
+    return gamepad_data;
+  }
+  update_keyboard()
+  {
     this.keys.forEach(elem => elem.update(elem.isDown));
   }
+  update_both()
+  {
+    this.update_keyboard();
+    this.update_gamepads();
+  }
+  update() {}
 }
 //#endregion
 
@@ -453,6 +597,13 @@ class Game {
     else this.scenes = configs.scenes;
     this.ctx.canvas.style.backgroundColor =
       configs.backgroundColor || "#00ffbb";
+      if (configs.inputs)
+      {
+        if (configs.inputs.keyboard)
+          this.input_manager.keyboard();
+        if (configs.inputs.gamepad)
+          this.input_manager.gamepad();
+      }
     this.active_scene = new this.scenes[0](this);
     this.active_scene.load();
   }
@@ -473,14 +624,10 @@ class Game {
   }
   start() {
     this.last_time = Date.now();
-    document.addEventListener("keydown", this.keydown.bind(this));
-    document.addEventListener("keyup", this.keyup.bind(this));
     this.raf();
   }
   stop() {
     this.craf();
-    document.removeEventListener("keydown", this.keydown.bind(this));
-    document.removeEventListener("keyup", this.keyup.bind(this));
   }
   pause() {
     this.craf();
@@ -505,12 +652,6 @@ class Game {
     this.active_scene.draw(delta);
     this.input_manager.update();
     this.raf();
-  }
-  keydown(e: KeyboardEvent) {
-    if (!e.repeat) this.input_manager.keys.get(e.code)?.update(true);
-  }
-  keyup(e: KeyboardEvent) {
-    if (!e.repeat) this.input_manager.keys.get(e.code)?.update(false);
   }
 }
 //#endregion
